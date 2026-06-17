@@ -8,13 +8,23 @@ encrypted_content for multi-turn stateless workflows.
 Docs: https://openrouter.ai/docs/api/reference/responses/overview
 """
 
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+import httpx
 
 import litellm
 from litellm.llms.openai.responses.transformation import OpenAIResponsesAPIConfig
 from litellm.secret_managers.main import get_secret_str
+from litellm.types.responses.main import ResponsesAPIResponse
 from litellm.types.router import GenericLiteLLMParams
 from litellm.types.utils import LlmProviders
+
+if TYPE_CHECKING:
+    from litellm.litellm_core_utils.litellm_logging import Logging as _LiteLLMLoggingObj
+
+    LiteLLMLoggingObj = _LiteLLMLoggingObj
+else:
+    LiteLLMLoggingObj = Any
 
 
 class OpenRouterResponsesAPIConfig(OpenAIResponsesAPIConfig):
@@ -75,6 +85,30 @@ class OpenRouterResponsesAPIConfig(OpenAIResponsesAPIConfig):
         api_base = api_base.rstrip("/")
 
         return f"{api_base}/responses"
+
+    def transform_response_api_response(
+        self,
+        model: str,
+        raw_response: httpx.Response,
+        logging_obj: LiteLLMLoggingObj,
+    ) -> ResponsesAPIResponse:
+        response = super().transform_response_api_response(
+            model=model,
+            raw_response=raw_response,
+            logging_obj=logging_obj,
+        )
+
+        try:
+            usage = raw_response.json().get("usage") or {}
+            response_cost = usage.get("cost")
+            if response_cost is not None:
+                response._hidden_params.setdefault("additional_headers", {})[
+                    "llm_provider-x-litellm-response-cost"
+                ] = float(response_cost)
+        except Exception:
+            pass
+
+        return response
 
     def supports_native_websocket(self) -> bool:
         """OpenRouter does not support native WebSocket for Responses API"""
